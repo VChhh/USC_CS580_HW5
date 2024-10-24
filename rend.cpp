@@ -6,6 +6,7 @@
 #include	"Gz.h"
 #include	"rend.h"
 
+#include "Vector2.h" // self-defined vector2 class
 #include "Vector3.h" // self-defined vector3 class
 #include "Vector4.h" // self-defined vector4 class
 #include "GzMatrix_extension.h" // self-defined matrix extension
@@ -560,6 +561,11 @@ int GzRender::GzPutAttribute(int numAttributes, GzToken	*nameList, GzPointer *va
 			spec = *(float*)valueList[i];
 			break;
 		}
+		case GZ_TEXTURE_MAP: {
+			GzTexture texture_function = (GzTexture)valueList[i];
+			tex_fun = texture_function;
+			break;
+		}
 		default:
 			break;
 		}
@@ -585,9 +591,22 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 */
 	if (numParts <= 0 || nameList == NULL || valueList == NULL) return GZ_FAILURE;
 
+	Vector3f* model_vertices;
+	Vector3f* model_normals;
+	Vector2f* uvs;
 
-	Vector3f* model_vertices = (Vector3f*)valueList[0];
-	Vector3f* model_normals = (Vector3f*)valueList[1];
+	for (size_t i = 0; i < numParts; ++i) {
+		if (nameList[i] == GZ_NULL_TOKEN) continue;
+		if (nameList[i] == GZ_POSITION) {
+			model_vertices = (Vector3f*)valueList[i];
+		}
+		if (nameList[i] == GZ_NORMAL) {
+			model_normals = (Vector3f*)valueList[i];
+		}
+		if (nameList[i] == GZ_TEXTURE_INDEX) {
+			uvs = (Vector2f*)valueList[i];
+		}
+	}
 
 	Vector4f vertices_4D[3];
 	Vector4f normals_4D[3];
@@ -615,14 +634,17 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 	if (vertices[0].y > vertices[1].y) {
 		vertices[0].swap(vertices[1]);
 		normals[0].swap(normals[1]);
+		uvs[0].swap(uvs[1]);
 	}
 	if (vertices[0].y > vertices[2].y) {
 		vertices[0].swap(vertices[2]);
 		normals[0].swap(normals[2]);
+		uvs[0].swap(uvs[2]);
 	}
 	if (vertices[1].y > vertices[2].y) {
 		vertices[1].swap(vertices[2]);
 		normals[1].swap(normals[2]);
+		uvs[1].swap(uvs[2]);
 	}
 
 	// check special cases
@@ -632,6 +654,7 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 		if (vertices[0].x > vertices[1].x) {
 			vertices[0].swap(vertices[1]);
 			normals[0].swap(normals[1]);
+			uvs[0].swap(uvs[1]);
 		}
 	}
 	// if vertices 1 and 2 are on a horizontal line
@@ -639,6 +662,7 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 		if (vertices[2].x > vertices[1].x) {
 			vertices[2].swap(vertices[1]);
 			normals[2].swap(normals[1]);
+			uvs[2].swap(uvs[1]);
 		}
 	}
 	else {
@@ -657,6 +681,7 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 		if (mid_x > vertices[1].x) {
 			vertices[1].swap(vertices[2]);
 			normals[1].swap(normals[2]);
+			uvs[1].swap(uvs[2]);
 		}
 	}
 
@@ -681,6 +706,11 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 	Vector4f plane = interpolate(vertices[0], vertices[1], vertices[2]);
 
 	// calculate the intensities
+	if (interp_mode == GZ_COLOR && tex_fun != NULL) {
+		Ka[0] = Ka[1] = Ka[2] = 1.0f;
+		Kd[0] = Kd[1] = Kd[2] = 1.0f;
+		Ks[0] = Ks[1] = Ks[2] = 1.0f;
+	}
 	Vector3f intensities[3];
 	for (size_t i = 0; i < 3; ++i) {
 		intensities[i] = calculate_intensity(normals[i], lights, numlights, ambientlight, Ks, Kd, Ka, spec);
@@ -696,12 +726,19 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 
 	// interpolate the normals
 	Vector4f normal_X, normal_Y, normal_Z;
-	for (size_t i = 0; i < 3; ++i) {
-		normal_X = interpolate(Vector3f(vertices[0].xy, normals[0].x), Vector3f(vertices[1].xy, normals[1].x), Vector3f(vertices[2].xy, normals[2].x));
-		normal_Y = interpolate(Vector3f(vertices[0].xy, normals[0].y), Vector3f(vertices[1].xy, normals[1].y), Vector3f(vertices[2].xy, normals[2].y));
-		normal_Z = interpolate(Vector3f(vertices[0].xy, normals[0].z), Vector3f(vertices[1].xy, normals[1].z), Vector3f(vertices[2].xy, normals[2].z));
-	}
+	normal_X = interpolate(Vector3f(vertices[0].xy, normals[0].x), Vector3f(vertices[1].xy, normals[1].x), Vector3f(vertices[2].xy, normals[2].x));
+	normal_Y = interpolate(Vector3f(vertices[0].xy, normals[0].y), Vector3f(vertices[1].xy, normals[1].y), Vector3f(vertices[2].xy, normals[2].y));
+	normal_Z = interpolate(Vector3f(vertices[0].xy, normals[0].z), Vector3f(vertices[1].xy, normals[1].z), Vector3f(vertices[2].xy, normals[2].z));
+	
 
+	// interpolate the uvs
+	Vector4f uv_U, uv_V;
+	for (size_t i = 0; i < 3; ++i) {
+		float Vz_prime = vertices[i].z / (MAXINT - vertices[i].z);
+		uvs[i] /= (Vz_prime + 1.0f);
+	}
+	uv_U = interpolate(Vector3f(vertices[0].xy, uvs[0].u), Vector3f(vertices[1].xy, uvs[1].u), Vector3f(vertices[2].xy, uvs[2].u));
+	uv_V = interpolate(Vector3f(vertices[0].xy, uvs[0].v), Vector3f(vertices[1].xy, uvs[1].v), Vector3f(vertices[2].xy, uvs[2].v));
 
 	// rasterize
 	for (int i = min_x; i <= max_x; ++i) {
@@ -722,7 +759,21 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 				int z = (int)(clip(plane, i, j) + 0.5f);
 
 				if (z >= 0) {
-					GzIntensity red, green, blue;
+					float red, green, blue;
+
+					// calculate color based on texture
+					GzColor texture_color;
+					if (tex_fun) {
+						float interpolated_Vz_prime = float(z) / (MAXINT - z);
+						float interpolated_u = clip(uv_U, i, j);
+						float interpolated_v = clip(uv_V, i, j);
+
+						float final_u = interpolated_u * (interpolated_Vz_prime + 1.0f);
+						float final_v = interpolated_v * (interpolated_Vz_prime + 1.0f);
+
+						tex_fun(final_u, final_v, texture_color);
+					}
+					
 					if (interp_mode == GZ_FLAT) {
 						/*red = ctoi(flatcolor[0]);
 						green = ctoi(flatcolor[1]);
@@ -731,27 +782,36 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 						green = ctoi(normals[0].y);
 						blue = ctoi(normals[0].z);*/
 						Vector3f intensity = calculate_intensity(normal_0, lights, numlights, ambientlight, Ks, Kd, Ka, spec);
-						red = ctoi(intensity.r);
-						green = ctoi(intensity.g);
-						blue = ctoi(intensity.b);
+						red = intensity.r;
+						green = intensity.g;
+						blue = intensity.b;
 					}
 					else if (interp_mode == GZ_COLOR) {
-						red = ctoi(clip(red_plane, i, j));
-						green = ctoi(clip(green_plane, i, j));
-						blue = ctoi(clip(blue_plane, i, j));
+						red = clip(red_plane, i, j);
+						green = clip(green_plane, i, j);
+						blue = clip(blue_plane, i, j);
+						if (tex_fun) {
+							red = red * texture_color[0];
+							green = green * texture_color[1];
+							blue = blue * texture_color[2];
+						}
 					}
 					else if (interp_mode == GZ_NORMAL) {
+						if (tex_fun) {
+							for (size_t k = 0; k < 3; ++k) {
+								Kd[k] = texture_color[k];
+								Ka[k] = texture_color[k];
+							}
+						}
 						Vector3f interpolated_normal = Vector3f(clip(normal_X, i, j), clip(normal_Y, i, j), clip(normal_Z, i, j));
 						Vector3f intensity = calculate_intensity(interpolated_normal, lights, numlights, ambientlight, Ks, Kd, Ka, spec);
-						red = ctoi(intensity.r);
-						green = ctoi(intensity.g);
-						blue = ctoi(intensity.b);
+						red = intensity.r;
+						green = intensity.g;
+						blue = intensity.b;
 					}
-					GzPut(i, j, red, green, blue, 1, z);
+					GzPut(i, j, ctoi(red), ctoi(green), ctoi(blue), 1, z);
+					//GzPut(i, j, ctoi(texture_color[RED]), ctoi(texture_color[GREEN]), ctoi(texture_color[BLUE]), 1, z);
 				}
-
-				// put the pixel
-
 			}
 		}
 	}
