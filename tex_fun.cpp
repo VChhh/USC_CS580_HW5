@@ -3,6 +3,43 @@
 #include	"stdio.h"
 #include	"Gz.h"
 
+// helper functions
+float pi = 3.1415926535897932;
+
+int checkboard(float u, float v, GzColor color, GzColor c1, GzColor c2) {
+	int check_size = 40;
+	int x = (int)(u * check_size) % 2;
+	int y = (int)(v * check_size) % 2;
+
+	if (x == y) {
+		color[0] = c1[0];
+		color[1] = c1[1];
+		color[2] = c1[2];
+	}
+	else {
+		color[0] = c2[0];
+		color[1] = c2[1];
+		color[2] = c2[2];
+	}
+	return GZ_SUCCESS;
+}
+
+float rings(float u, float v, float center_u, float center_v, int size) {
+	// get the largest distance from the center
+	float max_u = (center_u > 0.5) ? center_u : 1 - center_u;
+	float max_v = (center_v > 0.5) ? center_v : 1 - center_v;
+	float max_dist = sqrt(max_u * max_u + max_v * max_v);
+
+	float distance = 0;
+	if (max_dist != 0) {
+		distance = sqrt((u - center_u) * (u - center_u) + (v - center_v) * (v - center_v)) / max_dist;
+		distance = (sin((distance * size - 0.5) * pi * 2) + 1) / 2;
+	}
+	distance = (distance > 1) ? 1 : distance;
+
+	return distance;
+}
+
 GzColor	*image=NULL;
 int xs, ys;
 int reset = 1;
@@ -79,7 +116,22 @@ int tex_fun(float u, float v, GzColor color)
 
 /* Procedural texture function */
 int ptex_fun(float u, float v, GzColor color)
-{
+{	
+	GzColor c1 = { 1, 1, 1 };
+	GzColor c2 = { .5, .5, .5 };
+	GzColor checkboard_color = { 1, 1, 1 };
+	checkboard(u, v, checkboard_color, c1, c2);
+
+
+	float ring_coefficient_red = rings(u, v, 0.3, 0.7, 10);
+	float ring_coefficient_green = rings(u, v, 0.7, 0.3, 15);
+	float ring_coefficient_blue = rings(u, v, 0.5, 0.5, 20);
+
+	// combine the two textures
+	color[0] = checkboard_color[0] * ring_coefficient_red;
+	color[1] = checkboard_color[1] * ring_coefficient_green;
+	color[2] = checkboard_color[2] * ring_coefficient_blue;
+
 
 	return GZ_SUCCESS;
 }
